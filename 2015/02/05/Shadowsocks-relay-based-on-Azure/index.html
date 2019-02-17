@@ -1,0 +1,189 @@
+<!DOCTYPE HTML>
+<html>
+<head><meta name="generator" content="Hexo 3.8.0">
+  <meta charset="utf-8">
+  
+  <title>在Azure搭建ShadowSocks国内跳板，并开启UDP转发。 | Reficul</title>
+
+  
+  <meta name="author" content="Reficul">
+  
+
+  
+  <meta name="description" content="买BandwagonHost的VPS已经很久了，现在主要也是给朋友用。随着SS名声的变大，搬瓦工这个名字也在圈子里响当当了。用多了加上墙的变高，上海精品网等等的出现，速度越来越不理想。想来国内Azure还在免费，所以拿来搭个跳板机，速度应该会有一些提高。">
+  
+
+  
+  
+  <meta name="keywords" content="ShadowSocks,iptables,Azure,NAT">
+  
+
+  <meta id="viewport" name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, minimal-ui">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+  <meta property="og:title" content="在Azure搭建ShadowSocks国内跳板，并开启UDP转发。">
+
+  <meta property="og:site_name" content="Reficul">
+
+  
+  <meta property="og:image" content="/favicon.ico">
+  
+
+  <link href="/favicon.ico" rel="icon">
+  <link rel="alternate" href="/atom.xml" title="Reficul" type="application/atom+xml">
+  <link rel="stylesheet" href="/css/style.css" media="screen" type="text/css">
+</head>
+
+
+<body>
+<div class="blog">
+  <div class="content">
+
+    <header>
+  <div class="site-branding">
+    <h1 class="site-title">
+      <a href="/">Reficul</a>
+    </h1>
+    <p class="site-description"></p>
+  </div>
+  <nav class="site-navigation">
+    <ul>
+      
+        <li><a href="/">主页</a></li>
+      
+        <li><a href="/archives">归档</a></li>
+      
+    </ul>
+  </nav>
+</header>
+
+    <main class="site-main posts-loop">
+    <article>
+
+  
+    
+    <h3 class="article-title"><span>在Azure搭建ShadowSocks国内跳板，并开启UDP转发。</span></h3>
+    
+  
+
+  <div class="article-top-meta">
+    <span class="posted-on">
+      <a href="/2015/02/05/Shadowsocks-relay-based-on-Azure/" rel="bookmark">
+        <time class="entry-date published" datetime="2015-02-04T17:11:00.000Z">
+          Feb 5 2015
+        </time>
+      </a>
+    </span>
+  </div>
+
+
+  
+
+  <div class="article-content">
+    <div class="entry">
+      
+        <p>买BandwagonHost的VPS已经很久了，现在主要也是给朋友用。随着SS名声的变大，搬瓦工这个名字也在圈子里响当当了。用多了加上墙的变高，上海精品网等等的出现，速度越来越不理想。想来国内Azure还在免费，所以拿来搭个跳板机，速度应该会有一些提高。</p>
+<a id="more"></a>
+<p>找到SS的<a href="https://github.com/shadowsocks/shadowsocks/wiki/Setup-a-Shadowsocks-relay" target="_blank" rel="noopener">WIKI</a>，搭建一个转发只需要两行Iptables规则，但是根据作者说性能不如Haproxy。由于不需要负载平衡，所以直接照抄方案二的代码就完成了转发服务器的搭建。随之问题来了，UDP转发功能废了。无奈中，搜索得知Haproxy无法转发UDP包。不能转发UDP则不能借助SS-tunnel转发DNS来解决DNS投毒，更不能让走代理的流量获取最快的节点。这显然不能接受。然而正好咱不需要负载平衡，而且用户一只手掰得过来，想来内核级别的iptables性能应该不会差到哪去，并且这种无差别的转发一定是可以支持SS的UDP转发功能的。于是打定主意使用这个方案。<br><img src="/images/3/iptables.gif" alt="iptables工作流程"><br>半路出家的我对复杂的iptables设置很是头疼，扒了文章了解后，大概得知我们的需求是由SNAT和DNAT合作完成的。简而言之就是我们的客户机上将服务器设置为我们的跳板机，则数据包发送到跳板机上，然后修改源IP和目标IP地址，重新转发给后面真实的SS服务器上，以此完成整个过程。<br>那么依样画葫芦，摘取一下：</p>
+<pre><code>iptables -t nat -A PREROUTING -p tcp --dport 8388 -j DNAT --to-destination SS_VPS_IP:8388
+iptables -t nat -A POSTROUTING -p tcp -d SS_VPS_IP --dport 8388 -j SNAT --to-source Azure_IP
+</code></pre><p>以上只转发TCP包，应该能够实现原本基础的功能了，可是经测试<strong>无效</strong>。检查了Azure网页中的端口映射,检查了iptables是否打开了转发,FORWARD表默认ACCEPT后都没有排除故障，只好用TCPDUMP抓取数据包。抓包后发现，在Azure的机器上，iptables出色的完成了预计的任务（如图）。可是在SS服务器上，则是一个包都没进得来。挠头之余，很是无奈啊。<br><img src="/images/3/Azure.png" alt="Azure服务器抓包"><br><img src="/images/3/BWG.png" alt="BWG上的抓包"><br>后来发现，<strong>Azure在外层有一层NAT</strong>，所给虚拟机的IP虽然是公网IP，但是不是绑定在虚拟机网卡上的IP。Azure的防火墙在收到数据包后进行一次NAT，转发给内部虚拟机<strong>。出去的数据包也经过一次NAT</strong>，之后才进行发送。<br>虽然在出咱虚拟机网卡的包的目标地址被正确的修改，指向了SS-vps，但是源地址是该虚拟机的外网IP（Azure叫他：公用虚拟 IP (VIP)地址），这个包在经国Azure的外围防火墙的时候被丢弃，因为认为这个包的源IP不是内部的服务器的。<br>修改规则后，测试成功。并且SS-tunnel正常。修改后代码如下：</p>
+<pre><code>iptables -t nat -A PREROUTING -p tcp --dport 8388 -j DNAT --to-destination SS_VPS_IP:8388
+iptables -t nat -A PREROUTING -p udp --dport 8388 -j DNAT --to-destination SS_VPS_IP:8388
+iptables -t nat -A POSTROUTING -p tcp -d SS_VPS_IP --dport 8388 -j SNAT --to-source Azure内部 IP 地址
+iptables -t nat -A POSTROUTING -p udp -d SS_VPS_IP --dport 8388 -j SNAT --to-source Azure内部 IP 地址
+</code></pre><p>这个事情真的是会的不难，难的不会，加上有个暗坑（Azure的防火墙），让本来不复杂的事情变得困难了一些。不过好处是，在给了我动力和机会实践学习了Iptables的一些概念和命令。对表，链，规则有了基本的认识学习。收益颇多，也做个笔记。</p>
+<hr>
+<h1 id="December-7-2015-Updated"><a href="#December-7-2015-Updated" class="headerlink" title="December 7 2015 Updated:"></a>December 7 2015 Updated:</h1><p>腾讯云测试可用</p>
+
+      
+    </div>
+
+  </div>
+
+  <div class="article-footer">
+    <div class="article-meta pull-left">
+
+    
+      
+
+    <span class="post-categories">
+      <i class="icon-categories"></i>
+        <a href="/categories/Shadowsocks/">Shadowsocks</a>
+    </span>
+    
+
+    
+    
+
+    <span class="post-tags">
+      <i class="icon-tags"></i>
+        <a href="/tags/ShadowSocks/">ShadowSocks</a><a href="/tags/iptables/">iptables</a><a href="/tags/Azure/">Azure</a><a href="/tags/NAT/">NAT</a>
+    </span>
+    
+
+    </div>
+
+    
+  </div>
+</article>
+
+  
+
+
+	<section id="comment" class="comment">
+	  <div id="disqus_thread">
+	  <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+	  </div>
+	</section>
+
+	<script type="text/javascript">
+	var disqus_shortname = 'xuzhenglun';
+	(function(){
+	  var dsq = document.createElement('script');
+	  dsq.type = 'text/javascript';
+	  dsq.async = true;
+	  dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+	  (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+	}());
+	(function(){
+	  var dsq = document.createElement('script');
+	  dsq.type = 'text/javascript';
+	  dsq.async = true;
+	  dsq.src = '//' + disqus_shortname + '.disqus.com/count.js';
+	  (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+	}());
+	</script>
+
+
+
+
+    </main>
+
+    <footer class="site-footer">
+  <p class="site-info">
+    Proudly powered by <a href="https://hexo.io/" target="_blank">Hexo</a> and
+    Theme by <a href="https://github.com/CodeDaraW/Hacker" target="_blank">Hacker</a>
+    <br>
+    
+    &copy; 2019 Reficul
+    
+  </p>
+</footer>
+    
+<script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+                (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+            m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-57211109-1', 'auto');
+    ga('send', 'pageview');
+
+</script>
+
+  </div>
+</div>
+</body>
+</html>

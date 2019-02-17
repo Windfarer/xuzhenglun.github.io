@@ -1,0 +1,223 @@
+<!DOCTYPE HTML>
+<html>
+<head><meta name="generator" content="Hexo 3.8.0">
+  <meta charset="utf-8">
+  
+  <title>用Blaze实现Golang泛型 | Reficul</title>
+
+  
+  <meta name="author" content="Reficul">
+  
+
+  
+  <meta name="description" content="Golang是一门工程语言，语法元素很少很容易掌握。从而，只要不是太扯的人写出来的代码理应相差不大，并能够很快被人理解。泛型在现代编程语言中被广泛使用，这里不谈Go确实泛型是否是一种糟糕的设计，纯粹前段时间在gvisor的代码中看见一种实现泛型的方式比较新奇，因此拿来记录一下。">
+  
+
+  
+  
+  <meta name="keywords" content="Golang,Balze,generic-type">
+  
+
+  <meta id="viewport" name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, minimal-ui">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+  <meta property="og:title" content="用Blaze实现Golang泛型">
+
+  <meta property="og:site_name" content="Reficul">
+
+  
+  <meta property="og:image" content="/favicon.ico">
+  
+
+  <link href="/favicon.ico" rel="icon">
+  <link rel="alternate" href="/atom.xml" title="Reficul" type="application/atom+xml">
+  <link rel="stylesheet" href="/css/style.css" media="screen" type="text/css">
+</head>
+
+
+<body>
+<div class="blog">
+  <div class="content">
+
+    <header>
+  <div class="site-branding">
+    <h1 class="site-title">
+      <a href="/">Reficul</a>
+    </h1>
+    <p class="site-description"></p>
+  </div>
+  <nav class="site-navigation">
+    <ul>
+      
+        <li><a href="/">主页</a></li>
+      
+        <li><a href="/archives">归档</a></li>
+      
+    </ul>
+  </nav>
+</header>
+
+    <main class="site-main posts-loop">
+    <article>
+
+  
+    
+    <h3 class="article-title"><span>用Blaze实现Golang泛型</span></h3>
+    
+  
+
+  <div class="article-top-meta">
+    <span class="posted-on">
+      <a href="/2019/02/09/go-generic-type-with-blaze/" rel="bookmark">
+        <time class="entry-date published" datetime="2019-02-08T20:45:16.000Z">
+          Feb 9 2019
+        </time>
+      </a>
+    </span>
+  </div>
+
+
+  
+
+  <div class="article-content">
+    <div class="entry">
+      
+        <p>Golang是一门工程语言，语法元素很少很容易掌握。从而，只要不是太扯的人写出来的代码理应相差不大，并能够很快被人理解。泛型在现代编程语言中被广泛使用，这里不谈Go确实泛型是否是一种糟糕的设计，纯粹前段时间在<code>gvisor</code>的代码中看见一种实现泛型的方式比较新奇，因此拿来记录一下。</p>
+<a id="more"></a>
+<h2 id="老套路"><a href="#老套路" class="headerlink" title="老套路"></a>老套路</h2><p>由于Go本身并不支持泛型，常见的编程套路有以下几种：</p>
+<ol>
+<li>尽可能的重复自己：常见食用方式即使用<code>vim</code>宏、<code>sublime</code>、<code>vscode</code>提供的多行编辑与正则替换功能，来达到Write Once, Paste Anywhere的目的。这也是广大人民最喜闻乐见的黑Go的方式，比如下面这张图：</li>
+</ol>
+<p><img src="/images/6/go-generic.gif" alt="各路神仙利用编辑器复制替换"></p>
+<ol start="2">
+<li><p>尽可能的使用空接口和map：为了实践Don’t Repeat Yourself的金玉良言，各路神仙纷纷使用起<code>interface{}</code>配合嵌套<code>map[string]interface{}</code>.完美,要用啥再下断言。毕竟<code>超过两次的就需要抽象了</code>，而空接口是一切抽象最终形态，毕竟只要你想，空接口这种抽象能够装下整个宇宙。</p>
+</li>
+<li><p>利用工具生成代码：整一个模板扣几个洞，佐上Jinja2、Mustache、Go Template啥的，基于字符串把我要的类型替换进去。啥？你说基于字符串的替换没有语义，不能用编译器检查与法还容易错？拜托，又不是不能用，要啥自行车？。至于自动化嘛，其实<code>go generate</code>还是能用的，至少比没有好对吧。</p>
+</li>
+</ol>
+<h2 id="新亮点"><a href="#新亮点" class="headerlink" title="新亮点"></a>新亮点</h2><p><code>gvisor</code>项目里，<code>third_party/gvsync</code>这个包利用了Blaze+一个小工具，实现了一个简单的泛型方案。虽然不可能从语言级别上让出发已久的Go支持泛型，不过这也是一种比较优雅的方案了。这个方案本质上属于上面的套路3，是一种基于模板的泛型方案，但是更精致一些。</p>
+<ol>
+<li><p>依赖于构建工具<code>Balze</code>，在构建的时候按需生成代码。模板只写一份，哪个包用到这个泛型算法，就在那个中声明依赖和目标类型即可。而不是在算法处一次性生成一大堆wrapper，真正做到了泛型想做到的解耦。</p>
+</li>
+<li><p>类型安全：模板只是一个普通的Go源代码文件，可以被编译器进行语法检查，甚至运行测试。</p>
+</li>
+<li><p>基于AST，而不是简单的字符串替换。直接操作抽象语法树，把模板源代码文件中的某一个类型替换为目标类型，不但保证序列化后的代码一定合法，而且实现了如果出现同名的元素不会被错误的替换，甚至在新的子作用域中，不会替换自作用域中同名的元素。</p>
+</li>
+</ol>
+<h2 id="细节"><a href="#细节" class="headerlink" title="细节"></a>细节</h2><p>要实现这个功能，需要一个命令行工具对模板进行渲染，以及构建系统的支持从而实现自动化构建。</p>
+<h3 id="渲染工具"><a href="#渲染工具" class="headerlink" title="渲染工具"></a>渲染工具</h3><p>这个渲染工具是gvisor为了在项目里使用而写的，并非一个专业的渲染模板。但是就功能上而言，应该已经能够胜任Go在泛型渲染上的需求。这个工具的代码位于<code>tools/go_generics</code>，主要功能就在此的3个文件之内，不到500行代码里。处理的流程大致按照以下步骤：</p>
+<ol>
+<li>将单个Go源码文件读入内存并利用标准库中自带的Parser解析到AST；</li>
+<li>把注释和import信息统计进<code>map</code>，以供生成代码的时候去除不需要的注释和依赖包；</li>
+<li>遍历AST，对Global作用域内的节点以及别处的引用按照CMD Flag中的设置进行替换；</li>
+<li>去除AST内需要去除的原始类型定义； </li>
+<li>依照魔改后的AST，对照过程（2）中<code>map</code>中的信息重新生成新的Go源码。</li>
+</ol>
+<p>利用这个工具，能够做到一下事情：</p>
+<ol>
+<li>将模板中定义的一个类型按照Go的语义重构成一个新的类型；</li>
+<li>将模板中定义的用来占位的类型以及其方法完全删除；</li>
+<li>将模板中的类型以及函数添加后缀，并修改此类型的引用（例如类型断言等）；</li>
+<li>修改全局定义的常量以及包名。</li>
+</ol>
+<h3 id="构建工具集成"><a href="#构建工具集成" class="headerlink" title="构建工具集成"></a>构建工具集成</h3><p>Blaze类Python的语法提供了极大的自由度，在<code>tools/go_generics/defs.blz</code>中定义了上述命令行工具的wrapper。利用这个封装，任何模块下的BUILD脚本都可以import这个定义文件，从而支持泛型模板的渲染。</p>
+<ol>
+<li><code>_go_template_instance_impl</code>实现了对命令行工具的封装，把命令行的Flag都封装成了一个配置对象。</li>
+<li>在BUILD中import上述定义文件，比如<code>third_party/gvsync</code>。在这个包里，<code>generic_atomicptr.go</code>和<code>generic_seqatomic.go</code>便是一个泛型。以后者为例，使用这个泛型的测试的BUILD文件：<code>third_party/gvsync/seqatomictest/BUILD</code>中所定义的：<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">go_template_instance(</span><br><span class="line">    name = <span class="string">"seqatomic_int"</span>,</span><br><span class="line">    out = <span class="string">"seqatomic_int.go"</span>,</span><br><span class="line">    package = <span class="string">"seqatomic"</span>,</span><br><span class="line">    suffix = <span class="string">"Int"</span>,</span><br><span class="line">    template = <span class="string">"//third_party/gvsync:generic_seqatomic"</span>,</span><br><span class="line">    types = &#123;</span><br><span class="line">        <span class="string">"Value"</span>: <span class="string">"int"</span>,</span><br><span class="line">    &#125;,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+</li>
+</ol>
+<p>将<code>third_party/gvsync/seqatomic_unsafe.go</code>作为模板，将Value类型换成int类型，并在导出的方法和类型后添加Int后缀。比如原本的<code>func SeqAtomicLoad(sc *gvsync.SeqCount, ptr *Value) Value</code>方法，经过渲染的结果则为<code>func SeqAtomicLoadInt(sc *gvsync.SeqCount, ptr *int) int</code>。</p>
+<h2 id="结论"><a href="#结论" class="headerlink" title="结论"></a>结论</h2><p>Go没有泛型的支持，的确对代码的表现能力进行了极大的限制；而众多泛型的山寨版本也没一个好用的，本文提到的这种方式至少也提供了一种尝试。好处：泛型算法提供者和使用者解耦了，使用源生Go代码作为模板，支持测试和补全等；坏处：使用难度较高，心智负担不必直接支持泛型低，甚至更高。</p>
+<p>所以，Go Sucks</p>
+
+      
+    </div>
+
+  </div>
+
+  <div class="article-footer">
+    <div class="article-meta pull-left">
+
+    
+      
+
+    <span class="post-categories">
+      <i class="icon-categories"></i>
+        <a href="/categories/Golang/">Golang</a>
+    </span>
+    
+
+    
+    
+
+    <span class="post-tags">
+      <i class="icon-tags"></i>
+        <a href="/tags/Golang/">Golang</a><a href="/tags/Balze/">Balze</a><a href="/tags/generic-type/">generic-type</a>
+    </span>
+    
+
+    </div>
+
+    
+  </div>
+</article>
+
+  
+
+
+	<section id="comment" class="comment">
+	  <div id="disqus_thread">
+	  <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+	  </div>
+	</section>
+
+	<script type="text/javascript">
+	var disqus_shortname = 'xuzhenglun';
+	(function(){
+	  var dsq = document.createElement('script');
+	  dsq.type = 'text/javascript';
+	  dsq.async = true;
+	  dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+	  (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+	}());
+	(function(){
+	  var dsq = document.createElement('script');
+	  dsq.type = 'text/javascript';
+	  dsq.async = true;
+	  dsq.src = '//' + disqus_shortname + '.disqus.com/count.js';
+	  (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+	}());
+	</script>
+
+
+
+
+    </main>
+
+    <footer class="site-footer">
+  <p class="site-info">
+    Proudly powered by <a href="https://hexo.io/" target="_blank">Hexo</a> and
+    Theme by <a href="https://github.com/CodeDaraW/Hacker" target="_blank">Hacker</a>
+    <br>
+    
+    &copy; 2019 Reficul
+    
+  </p>
+</footer>
+    
+<script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+                (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+            m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-57211109-1', 'auto');
+    ga('send', 'pageview');
+
+</script>
+
+  </div>
+</div>
+</body>
+</html>
